@@ -1,0 +1,71 @@
+name: Build screc (Windows amd64)
+
+"on":
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '上游仓库分支 / tag / commit（默认 master）'
+        required: false
+        default: master
+  push:
+    branches: [main, master]
+  schedule:
+    # 每周一 00:00 UTC 自动拉取上游最新代码并构建
+    - cron: '0 0 * * 1'
+
+jobs:
+  build-win-amd64:
+    name: Build Windows x64
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout upstream screc
+        uses: actions/checkout@v4
+        with:
+          repository: lvzhenbo/screc
+          ref: ${{ github.event.inputs.ref || 'master' }}
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+
+      - name: Build release binaries
+        run: |
+          cargo build --release \
+            --target x86_64-pc-windows-msvc \
+            --package screc \
+            --package screc-gui
+
+      - name: Verify binaries
+        run: |
+          ls -lh target/x86_64-pc-windows-msvc/release/*.exe
+          file target/x86_64-pc-windows-msvc/release/*.exe
+
+      - name: Package
+        run: |
+          mkdir -p screc-win-amd64
+          cp target/x86_64-pc-windows-msvc/release/screc.exe    screc-win-amd64/
+          cp target/x86_64-pc-windows-msvc/release/screc-gui.exe screc-win-amd64/
+          cp README.md LICENSE screc-win-amd64/ 2>/dev/null || true
+          ZIP_NAME="screc-win-amd64-$(date -u +%Y%m%d)"
+          mv screc-win-amd64 "${ZIP_NAME}"
+          7z a -tzip "${ZIP_NAME}.zip" "${ZIP_NAME}"
+          echo "BUILD_DATETIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}.zip
+          if-no-files-found: error
+
+      - name: Show result
+        run: |
+          echo "Build finished at ${{ env.BUILD_DATETIME }}"
+          unzip -l "${ZIP_NAME}.zip"
